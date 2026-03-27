@@ -23,7 +23,8 @@ class FileListView(APIView):
     
     def get(self, request):
         files = UploadedFile.objects.all()
-        serializer = UploadedFileSerializer(files, many=True)
+        existing = [f for f in files if f.file.storage.exists(f.file.name)]
+        serializer = UploadedFileSerializer(existing, many=True)
         return Response(serializer.data)
 
 class FileRetrieveView(APIView):
