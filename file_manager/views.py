@@ -3,12 +3,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import UploadedFile
 from .serializers import UploadedFileSerializer
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 
 class FileUploadView(APIView):
-    permission_classes = [AllowAny] 
+    permission_classes = [IsAuthenticated]
     
     def post(self, request):
         print("Request data:", request.data) 

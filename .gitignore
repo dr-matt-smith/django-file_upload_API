@@ -12,3 +12,6 @@ media/
 .idea/
 .vscode/
 venv/
+test_api/config.py
+test_api/downloads/
+*.zip
