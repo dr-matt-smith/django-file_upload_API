@@ -6,16 +6,25 @@ from .serializers import UploadedFileSerializer
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
+from .zip_utils import extract_zip_to_public
 
 class FileUploadView(APIView):
     permission_classes = [IsAuthenticated]
-    
+
     def post(self, request):
-        print("Request data:", request.data) 
+        print("Request data:", request.data)
         serializer = UploadedFileSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            instance = serializer.save()
+            response_data = serializer.data
+
+            original_name = request.FILES['file'].name
+            if original_name.lower().endswith('.zip'):
+                public_url = extract_zip_to_public(instance.file.path, original_name)
+                response_data = dict(response_data)
+                response_data['public_url'] = public_url
+
+            return Response(response_data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class FileListView(APIView):

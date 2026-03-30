@@ -125,6 +125,13 @@ python manage.py test
 - Requirements: Ensure the test database is created during the first run.
 
 
+## to run webserver
+
+```bash
+source venv/bin/activate && python manage.py runserver 8001 
+```
+
+
 
 
 

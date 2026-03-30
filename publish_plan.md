@@ -11,7 +11,7 @@
 Open a Bash console on PythonAnywhere and clone your repo:
 
 ```bash
-git clone git@github.com:yourusername/django-file_upload_API.git
+git clone git@github.com:drmattsmith/django-file_upload_API.git
 ```
 
 Set up SSH keys on GitHub beforehand if needed.
@@ -35,16 +35,25 @@ workon file-upload-venv
 
 ## Step 3: Configure Settings
 
-Edit `file_upload_api/settings.py`:
+Create a `.env` file in the project root on PythonAnywhere:
+
+```bash
+nano ~/django-file_upload_API/.env
+```
+
+Add the following:
+
+```
+DJANGO_SECRET_KEY=your-secret-key-here
+DEBUG=False
+```
+
+`settings.py` automatically loads this file and reads `SECRET_KEY` from `DJANGO_SECRET_KEY`. Never commit `.env` to version control.
+
+Then edit `file_upload_api/settings.py` to add your PythonAnywhere domain:
 
 ```python
-# Allow your PythonAnywhere domain
-ALLOWED_HOSTS = ['yourusername.pythonanywhere.com']
-
-# Use an environment variable or hard-code a new secret key (never commit secrets)
-SECRET_KEY = 'your-new-secret-key'
-
-DEBUG = False
+ALLOWED_HOSTS = ['drmattsmith.pythonanywhere.com']
 ```
 
 No database changes needed — SQLite is already configured and will work as-is.
@@ -110,7 +119,7 @@ Click the WSGI file link in the Web tab and replace the Django section with:
 import os
 import sys
 
-path = '/home/yourusername/django-file_upload_API'
+path = '/home/drmattsmith/django-file_upload_API'
 if path not in sys.path:
     sys.path.insert(0, path)
 
@@ -130,8 +139,8 @@ In the **Web tab → Static Files** section, add two mappings:
 
 | URL      | Path                                                          |
 |----------|---------------------------------------------------------------|
-| /static/ | /home/yourusername/django-file_upload_API/staticfiles/        |
-| /media/  | /home/yourusername/django-file_upload_API/media/              |
+| /static/ | /home/drmattsmith/django-file_upload_API/staticfiles/        |
+| /media/  | /home/drmattsmith/django-file_upload_API/media/              |
 
 ---
 
@@ -139,8 +148,8 @@ In the **Web tab → Static Files** section, add two mappings:
 
 Click **Reload** in the Web tab, then visit:
 
-- `https://yourusername.pythonanywhere.com/api/files/` — API
-- `https://yourusername.pythonanywhere.com/admin/` — Admin panel
+- `https://drmattsmith.pythonanywhere.com/api/files/` — API
+- `https://drmattsmith.pythonanywhere.com/admin/` — Admin panel
 
 ---
 
@@ -162,4 +171,4 @@ Then click **Reload** in the Web tab.
 
 - SQLite is suitable for testing and small-scale use; migrate to MySQL for production
 - Check the **error log** in the Web tab if anything goes wrong
-- Media file uploads will be stored under `/home/yourusername/django-file_upload_API/media/`
+- Media file uploads will be stored under `/home/drmattsmith/django-file_upload_API/media/`
