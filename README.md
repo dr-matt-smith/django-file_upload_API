@@ -132,6 +132,16 @@ source venv/bin/activate && python manage.py runserver 8001
 ```
 
 
+## to update on Pythonanwhere
+
+1. git stash (settings.py)
+2. git pull
+3. git stash apply
+4. go do WEB table and restart web server
+
+
+
+
 
 
 
