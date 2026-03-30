@@ -1,12 +1,27 @@
-can you write a plan "plan_unzipper.md" for the steps you'd take to update this project with the following functionality:
+there is a problem with this project
 
-(1) when a new ZIP is uploaded, it is unzipped into a public folder, the same name as a ZIP file (less the .zip extension)
+it does UNZIP the uplaoded ZIP file to /media/public/<zipFileName>
 
-for example, if "matt.zip" is uploaded, then "/public/matt" will return those files 
+it does create an "index.html" listing the files in this folder (if no index.html exists)
 
-for example, if "monday12.zip" is uploaded, then "/public/monday12" will return those files
+BUT the links in this generated "index.html" are missing the fodler name (i.e. <zipFileName>)
 
 
-NOTE - if there isn't an index.html in the unzipped files, then create one that lists all the files (as links) in this public folder
+==
 
-(2) if there is already a public folder the same name, the existing (older) folder is deleted and a new one created for the newly uploaded and decompressed ZIP file
+an example of this problem:
+
+I uploaded to https://drmattsmith.pythonanywhere.com/ a zip "chris_test.zip"
+
+I can see the generated index.html at:
+    - https://drmattsmith.pythonanywhere.com/media/public/chris_test
+
+this index file shows "chuck_norchess.html" as a file
+
+but when I click this file it linjks to URL:
+-https://drmattsmith.pythonanywhere.com/media/public/chuck_norchess.html
+
+when it should link to:
+https://drmattsmith.pythonanywhere.com/media/public/chris_test/chuck_norchess.html
+
+please fix the code that generated the index.html to the correct links

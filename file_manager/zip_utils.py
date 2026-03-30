@@ -30,12 +30,13 @@ def extract_zip_to_public(zip_file_path: str, zip_filename: str) -> str:
 
     # Generate index.html if not present
     if not os.path.exists(os.path.join(dest_dir, 'index.html')):
-        _generate_index(dest_dir, name)
+        base_url = f"{settings.MEDIA_URL}public/{name}/"
+        _generate_index(dest_dir, name, base_url)
 
     return f'/public/{name}/'
 
 
-def _generate_index(dest_dir: str, folder_name: str):
+def _generate_index(dest_dir: str, folder_name: str, base_url: str = ''):
     """Creates a simple index.html listing all files in dest_dir as links."""
     files = []
     for root, dirs, filenames in os.walk(dest_dir):
@@ -47,9 +48,10 @@ def _generate_index(dest_dir: str, folder_name: str):
     links = '\n'.join(
         f'    <li><a href="{f}">{f}</a></li>' for f in files
     )
+    base_tag = f'<base href="{base_url}">' if base_url else ''
     html = f"""<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>{folder_name}</title></head>
+<head><meta charset="utf-8">{base_tag}<title>{folder_name}</title></head>
 <body>
   <h1>{folder_name}</h1>
   <ul>
