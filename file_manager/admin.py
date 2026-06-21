@@ -82,7 +82,7 @@ class PackageAdmin(admin.ModelAdmin):
 
 @admin.register(PackageVersion)
 class PackageVersionAdmin(admin.ModelAdmin):
-    list_display = ['package', 'version', 'author', 'uploaded_at', 'tombstoned_at']
+    list_display = ['package', 'version', 'author', 'uploaded_at', 'deleted_at']
     list_filter = ['package__organisation']
     search_fields = ['package__name', 'author__name']
     readonly_fields = ['uploaded_at']

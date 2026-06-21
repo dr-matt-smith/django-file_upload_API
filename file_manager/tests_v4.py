@@ -159,10 +159,10 @@ class PackageTomlParseTests(TestCase):
             self._parse({'package.toml': '[package]\nauthor = "a"\n'})
         self.assertIn('name', str(ctx.exception))
 
-    def test_missing_author_rejected(self):
-        with self.assertRaises(PackageValidationError) as ctx:
-            self._parse({'package.toml': '[package]\nname = "x"\n'})
-        self.assertIn('author', str(ctx.exception))
+    def test_missing_author_in_manifest_is_ok(self):
+        # v10: manifest author is optional; form field is authoritative.
+        parsed = self._parse({'package.toml': '[package]\nname = "x"\n'})
+        self.assertIsNone(parsed.author)
 
     def test_type_is_optional_and_ignored(self):
         # v7: a manifest without a type parses fine.
@@ -267,7 +267,7 @@ class PublishTests(TestCase):
         self.assertEqual(resp.data['version'], 1)
         self.assertEqual(resp.data['package'], 'demo')
         self.assertEqual(resp.data['author'], 'alice')
-        self.assertTrue(resp.data['content_hash'].startswith('sha256:'))
+        self.assertEqual(len(resp.data['content_hash']), 64)   # bare lowercase hex
 
     def test_author_comes_from_manifest(self):
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo', author='bob')})
@@ -333,7 +333,9 @@ class PublishTests(TestCase):
 # Server-stamped version
 # ---------------------------------------------------------------------------
 
-class StampedVersionTests(TestCase):
+class ManifestPassthroughTests(TestCase):
+    """v10: package.toml passes through verbatim — no version injection."""
+
     def setUp(self):
         self.client = auth_client()
 
@@ -343,12 +345,12 @@ class StampedVersionTests(TestCase):
             data = zf.read('package.toml').decode('utf-8')
         return tomllib.loads(data)
 
-    def test_version_stamped_when_omitted(self):
+    def test_version_field_absent_not_injected(self):
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
         toml_data = self._read_toml_from_v('demo', 1)
-        self.assertEqual(toml_data['package']['version'], 1)
+        self.assertNotIn('version', toml_data['package'])
 
-    def test_version_stamped_replaces_stale(self):
+    def test_explicit_version_in_manifest_preserved(self):
         toml = (
             '[package]\n'
             'name = "demo"\n'
@@ -357,13 +359,19 @@ class StampedVersionTests(TestCase):
         )
         publish(self.client, 'demo', {'package.toml': toml})
         toml_data = self._read_toml_from_v('demo', 1)
-        self.assertEqual(toml_data['package']['version'], 1)
+        self.assertEqual(toml_data['package']['version'], 99)
 
-    def test_version_increments_in_stamped_toml(self):
+    def test_manifest_unchanged_across_versions(self):
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
-        self.assertEqual(self._read_toml_from_v('demo', 1)['package']['version'], 1)
-        self.assertEqual(self._read_toml_from_v('demo', 2)['package']['version'], 2)
+        self.assertNotIn('version', self._read_toml_from_v('demo', 1)['package'])
+        self.assertNotIn('version', self._read_toml_from_v('demo', 2)['package'])
+
+    def test_missing_manifest_and_form_author_rejected(self):
+        toml = '[package]\nname = "demo"\n'   # no author field
+        resp = publish(self.client, 'demo', {'package.toml': toml})
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn('author', resp.data['detail'])
 
 
 # ---------------------------------------------------------------------------
@@ -377,16 +385,18 @@ class AliasTests(TestCase):
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
 
-    def test_latest_auto_set_on_publish(self):
+    def test_latest_not_auto_set_on_publish(self):
+        # v9: latest is client-resolved; the server no longer auto-manages it.
         resp = self.client.get('/api/packages/demo/aliases')
         self.assertEqual(resp.status_code, 200)
-        latest = next(a for a in resp.data if a['name'] == 'latest')
-        self.assertEqual(latest['version'], 3)
+        names = [a['name'] for a in resp.data]
+        self.assertNotIn('latest', names)
 
-    def test_latest_moves_on_subsequent_publish(self):
+    def test_latest_not_created_on_subsequent_publish(self):
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
-        latest = PackageAlias.objects.get(package__name='demo', name='latest')
-        self.assertEqual(latest.version.version, 4)
+        self.assertFalse(
+            PackageAlias.objects.filter(package__name='demo', name='latest').exists()
+        )
 
     def test_set_user_alias(self):
         resp = self.client.put(
@@ -456,23 +466,28 @@ class AliasTests(TestCase):
         )
         self.assertEqual(resp.status_code, 409)
 
-    def test_user_alias_dropped_on_version_tombstone(self):
+    def test_user_alias_static_after_version_delete(self):
+        # v9: aliases are static — deleting a version does NOT remove or
+        # repoint any alias that pointed at it.
         self.client.put(
             '/api/packages/demo/aliases/stable',
             data=json.dumps({'version': 2}),
             content_type='application/json',
         )
         self.client.delete('/api/packages/demo/versions/2')
-        self.assertFalse(
+        self.assertTrue(
             PackageAlias.objects.filter(package__name='demo', name='stable').exists()
         )
 
-    def test_latest_moves_on_tombstone_of_head(self):
+    def test_latest_not_repointed_on_version_delete(self):
+        # v9: server does not manage latest; deleting head leaves no alias change.
         self.client.delete('/api/packages/demo/versions/3')
-        latest = PackageAlias.objects.get(package__name='demo', name='latest')
-        self.assertEqual(latest.version.version, 2)
+        self.assertFalse(
+            PackageAlias.objects.filter(package__name='demo', name='latest').exists()
+        )
 
-    def test_latest_deleted_when_all_versions_tombstoned(self):
+    def test_aliases_not_mutated_when_all_versions_deleted(self):
+        # v9: no alias mutation on delete regardless of how many versions are removed.
         for n in (3, 2, 1):
             self.client.delete(f'/api/packages/demo/versions/{n}')
         self.assertFalse(
@@ -488,7 +503,8 @@ class AliasTests(TestCase):
         resp = self.client.get('/api/packages/demo/aliases')
         self.assertEqual(resp.status_code, 200)
         names = sorted(a['name'] for a in resp.data)
-        self.assertEqual(names, ['latest', 'stable'])
+        # v9: latest is no longer auto-created; only publisher-set aliases appear.
+        self.assertEqual(names, ['stable'])
 
     def test_delete_user_alias(self):
         self.client.put(
@@ -508,19 +524,13 @@ class LatestShortcutTests(TestCase):
     def setUp(self):
         self.client = auth_client()
 
-    def test_latest_returns_zip_of_latest_version(self):
+    def test_latest_404_when_no_alias_set(self):
+        # v9: latest is no longer auto-managed by the server; the endpoint
+        # returns 404 unless a latest alias row exists (set manually via DB).
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
-
-        resp_direct = self.client.get('/api/packages/demo/versions/2/download')
-        resp_latest = self.client.get('/api/packages/demo/latest')
-
-        self.assertEqual(resp_direct.status_code, 200)
-        self.assertEqual(resp_latest.status_code, 200)
-        self.assertEqual(
-            b''.join(resp_direct.streaming_content),
-            b''.join(resp_latest.streaming_content),
-        )
+        resp = self.client.get('/api/packages/demo/latest')
+        self.assertEqual(resp.status_code, 404)
 
     def test_latest_404_when_no_published_versions(self):
         self.client.post(
@@ -540,7 +550,7 @@ class TombstoneTests(TestCase):
     def setUp(self):
         self.client = auth_client()
 
-    def test_tombstone_returns_410(self):
+    def test_delete_returns_410(self):
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
         self.client.delete(
             '/api/packages/demo/versions/1',
@@ -549,9 +559,11 @@ class TombstoneTests(TestCase):
         )
         resp = self.client.get('/api/packages/demo/versions/1/download')
         self.assertEqual(resp.status_code, 410)
-        self.assertEqual(resp.data['tombstone_reason'], 'oops')
+        self.assertEqual(resp.data['delete_reason'], 'oops')
 
-    def test_whole_package_delete_cascade_tombstones_all_versions(self):
+    def test_whole_package_delete_removes_container(self):
+        # v9: DELETE /api/packages/{name} hard-deletes the Package row and
+        # cascade-removes all versions and aliases.
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
@@ -563,26 +575,29 @@ class TombstoneTests(TestCase):
         )
         self.assertEqual(resp.status_code, 204)
 
-        for n in (1, 2, 3):
-            v = PackageVersion.objects.get(package__name='demo', version=n)
-            self.assertIsNotNone(v.tombstoned_at)
-            self.assertEqual(v.tombstone_reason, 'killing it')
+        # Package is gone from the list.
+        list_resp = self.client.get('/api/packages')
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertFalse(any(p['name'] == 'demo' for p in list_resp.data))
 
-        self.assertFalse(
-            PackageAlias.objects.filter(package__name='demo').exists()
-        )
+        # Package detail returns 404.
+        self.assertEqual(self.client.get('/api/packages/demo').status_code, 404)
 
-    def test_whole_package_delete_preserves_name(self):
+        # All aliases removed.
+        self.assertFalse(PackageAlias.objects.filter(package__name='demo').exists())
+
+    def test_whole_package_delete_frees_name_for_reuse(self):
+        # v9: hard-delete removes the container row, so the name can be
+        # re-registered immediately.
         publish(self.client, 'demo', {'package.toml': package_toml(name='demo')})
         self.client.delete('/api/packages/demo')
 
-        # Re-registering same name must 409 (Package row preserved).
         resp = self.client.post(
             '/api/packages',
             data=json.dumps({'name': 'demo'}),
             content_type='application/json',
         )
-        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.status_code, 201)
 
 
 # ---------------------------------------------------------------------------
@@ -603,8 +618,8 @@ class ForkDetectionTests(TestCase):
             },
         )
         self.assertEqual(resp.status_code, 201, resp.data)
-        self.assertEqual(resp.data['forked_from']['package'], 'matt-editor')
-        self.assertEqual(resp.data['forked_from']['version'], 1)
+        self.assertEqual(resp.data['base']['name'], 'matt-editor')
+        self.assertEqual(resp.data['base']['version'], 1)
 
     def test_fork_detected_with_v3_history_still_works(self):
         publish(self.client, 'matt-editor', {'package.toml': package_toml(name='matt-editor', author='matt')})
@@ -615,7 +630,7 @@ class ForkDetectionTests(TestCase):
                 'HISTORY.md': v3_history('matt-editor', 1),
             },
         )
-        self.assertEqual(resp.data['forked_from']['package'], 'matt-editor')
+        self.assertEqual(resp.data['base']['name'], 'matt-editor')
 
     def test_fork_picks_max_version_from_v4_history(self):
         for _ in range(3):
@@ -627,7 +642,7 @@ class ForkDetectionTests(TestCase):
                 'HISTORY.md': v4_history('matt-editor', 3),
             },
         )
-        self.assertEqual(resp.data['forked_from']['version'], 3)
+        self.assertEqual(resp.data['base']['version'], 3)
 
 
 # ---------------------------------------------------------------------------
@@ -685,13 +700,13 @@ class ReadAPITests(TestCase):
             resp = APIClient().get(path)
             self.assertIn(resp.status_code, (401, 403), msg=path)
 
-    def test_detail_includes_aliases(self):
+    def test_detail_aliases_empty_without_publisher_aliases(self):
+        # v9: latest is no longer auto-created; no aliases until publisher sets one.
         resp = self.client.get('/api/packages/demo')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data['name'], 'demo')
         self.assertNotIn('type', resp.data)
-        names = [a['name'] for a in resp.data['aliases']]
-        self.assertIn('latest', names)
+        self.assertEqual(resp.data['aliases'], [])
 
     def test_versions_list(self):
         resp = self.client.get('/api/packages/demo/versions')
@@ -703,7 +718,7 @@ class ReadAPITests(TestCase):
         resp = self.client.get('/api/packages/demo/versions/1')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data['version'], 1)
-        self.assertTrue(resp.data['content_hash'].startswith('sha256:'))
+        self.assertEqual(len(resp.data['content_hash']), 64)   # bare lowercase hex
 
     def test_download_zip(self):
         resp = self.client.get('/api/packages/demo/versions/1/download')
@@ -733,7 +748,7 @@ class ContentHashTests(TestCase):
 
         resp = client.get('/api/packages/demo/versions/1/download')
         body = b''.join(resp.streaming_content)
-        expected = 'sha256:' + hashlib.sha256(body).hexdigest()
+        expected = hashlib.sha256(body).hexdigest()   # bare lowercase hex (v9)
         self.assertEqual(v1.content_hash, expected)
 
 

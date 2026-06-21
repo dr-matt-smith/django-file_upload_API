@@ -1,11 +1,10 @@
-"""Permission classes for the v7 package API.
+"""Permission classes for the Celbridge Workshop API.
 
-v7 removes anonymous access entirely. Every `/api/` request must resolve
-to an organisation — via an API key (`ApiKeyAuthentication`, which sets
-`request.organisation`) or an authenticated session whose user has a
-`Membership`. There is no finer read/write split: any valid org
-principal has full access to that org's data (role-based restriction is
-out of scope).
+All `/api/` requests must resolve to an organisation — via a Workshop Key
+(`ApiKeyAuthentication`, which sets `request.organisation`) or an
+authenticated session whose user has a `Membership`. There is no finer
+read/write split: any valid org principal has full access to that org's
+data (role-based restriction is out of scope).
 """
 from __future__ import annotations
 

@@ -1,8 +1,8 @@
-"""API-key authentication for the v7 package API.
+"""API-key authentication for the Celbridge Workshop API.
 
-Keys look like `kpf_<prefix>_<secret>`. Only the `prefix` (for lookup)
-and a salted hash of the full key are stored; the plaintext is shown
-once at issuance and never persisted.
+Workshop Keys look like `cel_<prefix>_<secret>`. Only the `prefix` (for
+lookup) and a salted hash of the full key are stored; the plaintext is
+shown once at issuance and never persisted.
 
 A successful authentication stashes the key's organisation on the
 request (`request.organisation`) for the permission/view layer. Org
@@ -25,13 +25,13 @@ def generate_key() -> tuple[str, str, str]:
     """Return (plaintext, prefix, hash). The plaintext is shown once."""
     prefix = secrets.token_hex(4)          # 8 hex chars
     secret = secrets.token_urlsafe(32)
-    plaintext = f'kpf_{prefix}_{secret}'
+    plaintext = f'cel_{prefix}_{secret}'
     return plaintext, prefix, make_password(plaintext)
 
 
 def _lookup_and_verify(raw: str) -> ApiKey | None:
     parts = raw.split('_', 2)
-    if len(parts) != 3 or parts[0] != 'kpf':
+    if len(parts) != 3 or parts[0] != 'cel':
         return None
     prefix = parts[1]
     for key in ApiKey.objects.filter(prefix=prefix, revoked_at__isnull=True):

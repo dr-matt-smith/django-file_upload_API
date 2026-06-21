@@ -40,11 +40,14 @@ def bundle(path: str, files: dict | None = None) -> dict:
     return out
 
 
-def post_pages(client, files: dict):
+def post_pages(client, files: dict, extra: dict | None = None):
     upload = SimpleUploadedFile(
         'bundle.zip', make_zip(files), content_type='application/zip',
     )
-    return client.post('/api/pages', {'file': upload}, format='multipart')
+    data = {'file': upload}
+    if extra:
+        data.update(extra)
+    return client.post('/api/pages', data, format='multipart')
 
 
 def served_dir(org_slug: str, path: str) -> str:
@@ -99,9 +102,9 @@ class PublishTests(PagesTestBase):
             self.assertEqual(body, b'<h1>idx</h1>', msg=url)
 
     def test_missing_manifest_422(self):
-        resp = post_pages(self.c, {'index.html': b'x'})       # no pages.toml
+        resp = post_pages(self.c, {'index.html': b'x'})   # no manifest, no path field
         self.assertEqual(resp.status_code, 422)
-        self.assertIn('pages.toml', resp.data['detail'])
+        self.assertIn('page.toml', resp.data['detail'])
         self.assertEqual(Page.objects.count(), 0)
 
     def test_missing_publish_path_422(self):
@@ -122,6 +125,45 @@ class PublishTests(PagesTestBase):
     def test_publish_requires_auth(self):
         resp = APIClient().post('/api/pages', {}, format='multipart')
         self.assertIn(resp.status_code, (401, 403))
+
+    def test_page_toml_singular_accepted(self):
+        files = {'page.toml': pages_toml('dev/chess24'), 'index.html': b'<h1>hi</h1>'}
+        resp = post_pages(self.c, files)
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data['path'], 'dev/chess24')
+        d = served_dir('a', 'dev/chess24')
+        self.assertTrue(os.path.isfile(os.path.join(d, 'index.html')))
+        self.assertFalse(os.path.exists(os.path.join(d, 'page.toml')))
+
+    def test_path_from_form_field_no_manifest(self):
+        files = {'index.html': b'<h1>hi</h1>'}
+        resp = post_pages(self.c, files, extra={'path': 'dev/chess24'})
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data['path'], 'dev/chess24')
+        d = served_dir('a', 'dev/chess24')
+        self.assertTrue(os.path.isfile(os.path.join(d, 'index.html')))
+
+    def test_author_from_form_field_stored(self):
+        resp = post_pages(
+            self.c,
+            bundle('dev/chess24', {'index.html': b'x'}),
+            extra={'author': 'alice'},
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data['published_by'], 'alice')
+        page = Page.objects.get(organisation=self.org, path='dev/chess24')
+        self.assertEqual(page.author, 'alice')
+
+    def test_absolute_url_with_canonical_origin(self):
+        with override_settings(CANONICAL_ORIGIN='https://example.com'):
+            resp = post_pages(self.c, bundle('dev/chess24', {'index.html': b'x'}))
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data['url'], 'https://example.com/pages/a/dev/chess24/')
+
+    def test_url_relative_when_canonical_origin_unset(self):
+        resp = post_pages(self.c, bundle('dev/chess24', {'index.html': b'x'}))
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data['url'], '/pages/a/dev/chess24/')
 
 
 # ---------------------------------------------------------------------------

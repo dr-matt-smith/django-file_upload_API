@@ -6,14 +6,14 @@ The DB is the source of truth. Output structure:
 
     ## Versions
 
-    ### Version <n>[ (tombstoned)]
+    ### Version <n>[ (deleted)]
 
     - **Author:** ...
     - **Date:** ...
     - **Hash:** ...
     - **Message:** ...
     - **Forked from:** ancestor v<n>
-    - **Tombstoned:** <reason>
+    - **Deleted:** <reason>
 
     <description body, if any>
 
@@ -49,13 +49,13 @@ def _render_version_block(
     forked_from_label: str | None = None,
 ) -> str:
     header = f'### Version {version.version}'
-    if version.is_tombstoned:
-        header += ' (tombstoned)'
+    if version.is_deleted:
+        header += ' (deleted)'
 
     lines = [header, '', f'- **Author:** {version.author.name}',
              f'- **Date:** {version.render_uploaded_at()}']
 
-    if version.content_hash and not version.is_tombstoned:
+    if version.content_hash and not version.is_deleted:
         lines.append(f'- **Hash:** {version.content_hash}')
 
     summary = (version.summary or '').strip()
@@ -65,10 +65,10 @@ def _render_version_block(
     if forked_from_label:
         lines.append(f'- **Forked from:** {forked_from_label}')
 
-    if version.is_tombstoned:
-        reason = (version.tombstone_reason or '').strip()
+    if version.is_deleted:
+        reason = (version.delete_reason or '').strip()
         if reason:
-            lines.append(f'- **Tombstoned:** {reason}')
+            lines.append(f'- **Deleted:** {reason}')
 
     body = (version.description or '').strip()
     if body:

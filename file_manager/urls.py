@@ -13,6 +13,7 @@ from .views import (
     PackageView,
     PagesView,
     PageView,
+    WhoAmIView,
 )
 
 
@@ -26,6 +27,7 @@ PATH = r'(?P<path>.+)'
 
 
 urlpatterns = [
+    re_path(r'^whoami/?$', WhoAmIView.as_view(), name='whoami'),
     re_path(r'^packages/?$', PackagesView.as_view(), name='packages'),
     re_path(rf'^packages/{NAME}/?$', PackageView.as_view(), name='package'),
     re_path(

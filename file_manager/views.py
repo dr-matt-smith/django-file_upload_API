@@ -77,37 +77,12 @@ class OrgScopedView(APIView):
         return get_object_or_404(Package, organisation=self.org, name=name)
 
 
-def _set_latest(package: Package, version: PackageVersion) -> None:
-    PackageAlias.objects.update_or_create(
-        package=package,
-        name=_RESERVED_ALIAS,
-        defaults={'version': version},
-    )
-
-
-def _move_or_drop_latest(package: Package) -> None:
-    """Re-point `latest` to the highest non-tombstoned version, or remove
-    the alias row if no such version remains."""
-    next_latest = (
-        PackageVersion.objects
-        .filter(package=package, tombstoned_at__isnull=True)
-        .order_by('-version')
-        .first()
-    )
-    if next_latest is None:
-        PackageAlias.objects.filter(package=package, name=_RESERVED_ALIAS).delete()
-    else:
-        _set_latest(package, next_latest)
-
-
-def _tombstone_version(version_obj: PackageVersion, reason: str) -> bool:
-    """Tombstone one version, cascading aliases and (if this is the
-    currently-published version) the live page. Returns True if it was
-    not already tombstoned."""
-    if version_obj.is_tombstoned:
+def _delete_version(version_obj: PackageVersion, reason: str) -> bool:
+    """Delete one version: clear the ZIP and description, record the reason.
+    Aliases are left pointing where the publisher put them (static contract).
+    Returns True if it was not already deleted."""
+    if version_obj.is_deleted:
         return False
-
-    package = version_obj.package
 
     if version_obj.zip_file:
         try:
@@ -115,20 +90,11 @@ def _tombstone_version(version_obj: PackageVersion, reason: str) -> bool:
         except Exception:
             pass
 
-    version_obj.tombstoned_at = timezone.now()
-    version_obj.tombstone_reason = reason
-    version_obj.save(update_fields=['tombstoned_at', 'tombstone_reason', 'zip_file'])
+    version_obj.deleted_at = timezone.now()
+    version_obj.delete_reason = reason
+    version_obj.description = ''
+    version_obj.save(update_fields=['deleted_at', 'delete_reason', 'description', 'zip_file'])
 
-    # Drop non-`latest` aliases pointing at this version.
-    PackageAlias.objects.filter(version=version_obj).exclude(name=_RESERVED_ALIAS).delete()
-    # Re-point `latest` if it pointed here.
-    if PackageAlias.objects.filter(
-        package=package, name=_RESERVED_ALIAS, version=version_obj,
-    ).exists():
-        _move_or_drop_latest(package)
-
-    # v8: tombstoning a version no longer touches pages — the two features
-    # are fully decoupled. Pages are taken down only via DELETE /api/pages.
     return True
 
 
@@ -181,7 +147,7 @@ class PackagesView(OrgScopedView):
 # ---------------------------------------------------------------------------
 
 class PackageView(OrgScopedView):
-    """GET — metadata. DELETE — cascade-tombstone all versions."""
+    """GET — metadata. DELETE — cascade-delete all versions and remove package."""
 
     def get(self, request, name):
         package = self.get_package(name)
@@ -194,14 +160,15 @@ class PackageView(OrgScopedView):
         if isinstance(request.data, dict):
             reason = request.data.get('reason', '') or ''
         if not reason:
-            reason = 'package tombstoned'
+            reason = 'package deleted'
 
         with transaction.atomic():
             for version in PackageVersion.objects.filter(
-                package=package, tombstoned_at__isnull=True,
+                package=package, deleted_at__isnull=True,
             ):
-                _tombstone_version(version, reason)
+                _delete_version(version, reason)
             PackageAlias.objects.filter(package=package).delete()
+            package.delete()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -251,6 +218,20 @@ class PackageVersionsView(OrgScopedView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        base_name = (request.data.get('base_name') or '').strip()
+        base_version_raw = request.data.get('base_version')
+        base_version = None
+        if base_version_raw not in (None, ''):
+            try:
+                base_version = int(base_version_raw)
+            except (TypeError, ValueError):
+                return Response(
+                    {'detail': '`base_version` must be an integer'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        author = (request.data.get('author') or '').strip()
+
         try:
             version = process_upload(
                 upload,
@@ -259,6 +240,9 @@ class PackageVersionsView(OrgScopedView):
                 summary=summary,
                 description=description,
                 parent_version=parent_version,
+                base_name=base_name,
+                base_version=base_version,
+                author=author,
             )
         except PackageValidationError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -286,7 +270,7 @@ class PackageVersionsView(OrgScopedView):
 # ---------------------------------------------------------------------------
 
 class PackageVersionView(OrgScopedView):
-    """GET — version metadata. DELETE — tombstone."""
+    """GET — version metadata. DELETE — delete."""
 
     def get(self, request, name, n):
         version_obj = get_object_or_404(
@@ -307,9 +291,9 @@ class PackageVersionView(OrgScopedView):
             version=n,
         )
 
-        if version_obj.is_tombstoned:
+        if version_obj.is_deleted:
             return Response(
-                {'detail': 'version already tombstoned'},
+                {'detail': 'version already deleted'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -318,7 +302,7 @@ class PackageVersionView(OrgScopedView):
             reason = request.data.get('reason', '') or ''
 
         with transaction.atomic():
-            _tombstone_version(version_obj, reason)
+            _delete_version(version_obj, reason)
 
         version_obj = (
             PackageVersion.objects
@@ -344,18 +328,18 @@ class PackageVersionDownloadView(OrgScopedView):
             package__name=name,
             version=n,
         )
-        if version_obj.is_tombstoned:
+        if version_obj.is_deleted:
             body = {
-                'detail': 'tombstoned',
+                'detail': 'deleted',
                 'package': name,
                 'version': version_obj.version,
                 'author': version_obj.author.name,
                 'date': version_obj.render_uploaded_at(),
                 'summary': version_obj.summary,
-                'tombstone_reason': version_obj.tombstone_reason,
-                'tombstoned_at': (
-                    version_obj.tombstoned_at.strftime('%Y-%m-%dT%H:%M:%SZ')
-                    if version_obj.tombstoned_at else None
+                'delete_reason': version_obj.delete_reason,
+                'deleted_at': (
+                    version_obj.deleted_at.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    if version_obj.deleted_at else None
                 ),
             }
             return Response(body, status=status.HTTP_410_GONE)
@@ -419,7 +403,7 @@ class PackageHistoryView(OrgScopedView):
 class PackageVersionHistoryView(OrgScopedView):
     """Render HISTORY.md as-of version <n>: this package's versions 1..n
     (newest first) plus the fork chain rooted at version 1. Versions > n
-    are not rendered. Tombstoned <n> still renders (with the tombstone
+    are not rendered. Deleted <n> still renders (with the deleted
     marker); only an unknown <n> returns 404."""
 
     def get(self, request, name, n):
@@ -504,9 +488,9 @@ class PackageAliasView(OrgScopedView):
                 {'detail': f'version {target_n} not found'},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        if target.is_tombstoned:
+        if target.is_deleted:
             return Response(
-                {'detail': f'version {target_n} is tombstoned'},
+                {'detail': f'version {target_n} is deleted'},
                 status=status.HTTP_409_CONFLICT,
             )
 
@@ -535,6 +519,32 @@ class PackageAliasView(OrgScopedView):
 
 
 # ---------------------------------------------------------------------------
+# /api/whoami
+# ---------------------------------------------------------------------------
+
+class WhoAmIView(OrgScopedView):
+    """Lightweight authenticated probe.
+
+    Returns 200 with the caller's organisation and author identity when the
+    Workshop Key is valid; DRF returns 401 automatically when it is not.
+    Lets the client distinguish 'key rejected' from 'host unreachable'.
+    """
+
+    def get(self, request):
+        org = self.org
+        author_name = None
+        if request.user and getattr(request.user, 'is_authenticated', False):
+            membership = getattr(request.user, 'membership', None)
+            if membership is not None:
+                author_name = request.user.get_username()
+        return Response({
+            'organisation': org.slug,
+            'organisation_name': org.name,
+            'author': author_name,
+        })
+
+
+# ---------------------------------------------------------------------------
 # /api/pages   and   /api/pages/<path>
 # ---------------------------------------------------------------------------
 
@@ -544,6 +554,10 @@ def _page_body(org, page):
         'url': page_url(org, page.path),
         'published_at': page.published_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
         'content_hash': page.content_hash,
+        'published_by': (
+            page.author
+            or (page.published_by.get_username() if page.published_by else 'service')
+        ),
     }
 
 
@@ -574,8 +588,11 @@ class PagesView(OrgScopedView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        path_field = (request.data.get('path') or '').strip()
+        author_field = (request.data.get('author') or '').strip()
+
         try:
-            parsed = parse_pages_zip(upload)
+            parsed = parse_pages_zip(upload, path_override=path_field)
         except PagesValidationError as exc:
             return Response(
                 {'detail': str(exc)},
@@ -589,6 +606,7 @@ class PagesView(OrgScopedView):
                 page = publish(
                     self.org, parsed.path, upload,
                     principal_user=request.user,
+                    author=author_field,
                 )
         except PathOverlapError as exc:
             return Response(

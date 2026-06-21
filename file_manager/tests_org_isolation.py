@@ -55,6 +55,12 @@ class ApiKeyAuthTests(TestCase):
 
     def test_bad_key_denied(self):
         c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION='Api-Key cel_deadbeef_nope')
+        resp = c.get('/api/packages')
+        self.assertEqual(resp.status_code, 401)
+
+    def test_kpf_key_rejected(self):
+        c = APIClient()
         c.credentials(HTTP_AUTHORIZATION='Api-Key kpf_deadbeef_nope')
         resp = c.get('/api/packages')
         self.assertEqual(resp.status_code, 401)
@@ -71,6 +77,48 @@ class ApiKeyAuthTests(TestCase):
         self.assertEqual(resp.status_code, 201, resp.data)
         v = PackageVersion.objects.get(package__name='demo', version=1)
         self.assertEqual(v.author.name, 'bob')          # from manifest, not principal
+
+
+class WhoAmITests(TestCase):
+    def setUp(self):
+        self.org = make_org('acme', name='Acme Corp')
+
+    def test_valid_service_key_returns_org(self):
+        c = key_client(self.org)
+        resp = c.get('/api/whoami')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['organisation'], 'acme')
+        self.assertEqual(resp.data['organisation_name'], 'Acme Corp')
+        self.assertIsNone(resp.data['author'])   # service key has no user
+
+    def test_valid_user_key_returns_author(self):
+        from django.contrib.auth.models import User
+        user = User.objects.create_user(username='alice', password='p')
+        from .models import Membership
+        Membership.objects.create(user=user, organisation=self.org)
+        c = key_client(self.org, user=user)
+        resp = c.get('/api/whoami')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['author'], 'alice')
+
+    def test_no_key_returns_401(self):
+        resp = APIClient().get('/api/whoami')
+        self.assertIn(resp.status_code, (401, 403))
+
+    def test_invalid_key_returns_401(self):
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION='Api-Key cel_bad_key')
+        resp = c.get('/api/whoami')
+        self.assertEqual(resp.status_code, 401)
+
+    def test_does_not_leak_cross_org_data(self):
+        org_b = make_org('b')
+        c_a = key_client(self.org)
+        c_b = key_client(org_b)
+        resp_a = c_a.get('/api/whoami')
+        resp_b = c_b.get('/api/whoami')
+        self.assertEqual(resp_a.data['organisation'], 'acme')
+        self.assertEqual(resp_b.data['organisation'], 'b')
 
 
 class CrossOrgIsolationTests(TestCase):
@@ -165,7 +213,7 @@ class ForkScopingTests(TestCase):
             },
         )
         self.assertEqual(resp.status_code, 201, resp.data)
-        self.assertIsNone(resp.data['forked_from'])
+        self.assertIsNone(resp.data['base'])
 
 
 class IssueApiKeyCommandTests(TestCase):
@@ -180,7 +228,7 @@ class IssueApiKeyCommandTests(TestCase):
     def _key_from_output(self, output):
         for line in output.splitlines():
             line = line.strip()
-            if line.startswith('kpf_'):
+            if line.startswith('cel_'):
                 return line
         raise AssertionError(f'no key in output:\n{output}')
 

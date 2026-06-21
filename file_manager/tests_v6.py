@@ -95,7 +95,7 @@ class VersionHistoryEndpointTests(TestCase):
     def test_includes_hash_for_requested_version(self):
         resp = self.client.get('/api/packages/demo/versions/1/history')
         v1 = PackageVersion.objects.get(package__name='demo', version=1)
-        self.assertTrue(v1.content_hash.startswith('sha256:'))
+        self.assertEqual(len(v1.content_hash), 64)   # bare lowercase hex (v9)
         self.assertIn(v1.content_hash.encode('utf-8'), resp.content)
 
     def test_no_aliases_section(self):
@@ -137,8 +137,8 @@ class VersionHistoryTombstoneTests(TestCase):
         )
         resp = self.client.get('/api/packages/demo/versions/1/history')
         self.assertEqual(resp.status_code, 200)
-        self.assertIn(b'### Version 1 (tombstoned)', resp.content)
-        self.assertIn(b'- **Tombstoned:** oops', resp.content)
+        self.assertIn(b'### Version 1 (deleted)', resp.content)
+        self.assertIn(b'- **Deleted:** oops', resp.content)
         # Hash line is suppressed on tombstoned versions.
         v1_block_start = resp.content.index(b'### Version 1')
         v1_block = resp.content[v1_block_start:]
@@ -156,12 +156,12 @@ class VersionHistoryTombstoneTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.content
         self.assertIn(b'### Version 3', body)
-        self.assertIn(b'### Version 2 (tombstoned)', body)
+        self.assertIn(b'### Version 2 (deleted)', body)
         self.assertIn(b'### Version 1', body)
 
         # Order: newest → oldest.
         i3 = body.index(b'### Version 3')
-        i2 = body.index(b'### Version 2 (tombstoned)')
+        i2 = body.index(b'### Version 2 (deleted)')
         i1 = body.index(b'### Version 1')
         self.assertTrue(i3 < i2 < i1)
 

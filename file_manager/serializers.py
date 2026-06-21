@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import Package, PackageAlias, PackageVersion, Page
+from .pages import page_url
 
 
 class PackageVersionSerializer(serializers.ModelSerializer):
@@ -8,8 +9,8 @@ class PackageVersionSerializer(serializers.ModelSerializer):
     author = serializers.CharField(source='author.name', read_only=True)
     date = serializers.SerializerMethodField()
     download_url = serializers.SerializerMethodField()
-    tombstoned = serializers.SerializerMethodField()
-    forked_from = serializers.SerializerMethodField()
+    deleted = serializers.SerializerMethodField()
+    base = serializers.SerializerMethodField()
 
     class Meta:
         model = PackageVersion
@@ -22,29 +23,26 @@ class PackageVersionSerializer(serializers.ModelSerializer):
             'description',
             'content_hash',
             'download_url',
-            'tombstoned',
-            'tombstone_reason',
-            'forked_from',
+            'deleted',
+            'delete_reason',
+            'base',
         ]
 
     def get_date(self, obj):
         return obj.render_uploaded_at()
 
     def get_download_url(self, obj):
-        if obj.is_tombstoned:
+        if obj.is_deleted:
             return None
         return f'/api/packages/{obj.package.name}/versions/{obj.version}/download'
 
-    def get_tombstoned(self, obj):
-        return obj.is_tombstoned
+    def get_deleted(self, obj):
+        return obj.is_deleted
 
-    def get_forked_from(self, obj):
-        if obj.forked_from_id is None:
-            return None
-        return {
-            'package': obj.forked_from.package.name,
-            'version': obj.forked_from.version,
-        }
+    def get_base(self, obj):
+        if obj.base_name:
+            return {'name': obj.base_name, 'version': obj.base_version}
+        return None
 
 
 class PackageAliasSerializer(serializers.ModelSerializer):
@@ -64,7 +62,7 @@ class PackageListItemSerializer(serializers.ModelSerializer):
         fields = ['name', 'latest_version', 'versions_count', 'created_at']
 
     def get_latest_version(self, obj):
-        latest = obj.versions.order_by('-version').first()
+        latest = obj.versions.filter(deleted_at__isnull=True).order_by('-version').first()
         if latest is None:
             return None
         return PackageVersionSerializer(latest).data
@@ -82,9 +80,7 @@ class PackageDetailSerializer(serializers.ModelSerializer):
         fields = ['name', 'created_at', 'versions', 'aliases']
 
     def get_versions(self, obj):
-        qs = obj.versions.order_by('-version').select_related(
-            'author', 'forked_from__package',
-        )
+        qs = obj.versions.order_by('-version').select_related('author')
         return PackageVersionSerializer(qs, many=True).data
 
     def get_aliases(self, obj):
@@ -102,10 +98,13 @@ class PageSerializer(serializers.ModelSerializer):
         fields = ['path', 'url', 'published_at', 'published_by', 'content_hash']
 
     def get_url(self, obj):
-        return f'/pages/{obj.organisation.slug}/{obj.path}/'
+        return page_url(obj.organisation, obj.path)
 
     def get_published_at(self, obj):
         return obj.published_at.strftime('%Y-%m-%dT%H:%M:%SZ')
 
     def get_published_by(self, obj):
-        return obj.published_by.get_username() if obj.published_by else 'service'
+        return (
+            obj.author
+            or (obj.published_by.get_username() if obj.published_by else 'service')
+        )

@@ -142,10 +142,12 @@ class PackageVersion(models.Model):
         blank=True,
         related_name='forks',
     )
-    tombstoned_at = models.DateTimeField(null=True, blank=True)
-    tombstone_reason = models.TextField(blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    delete_reason = models.TextField(blank=True)
     content_hash = models.CharField(max_length=80, blank=True)
     description = models.TextField(blank=True)
+    base_name = models.CharField(max_length=255, blank=True)
+    base_version = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         unique_together = ('package', 'version')
@@ -155,8 +157,8 @@ class PackageVersion(models.Model):
         return f'{self.package.name} v{self.version}'
 
     @property
-    def is_tombstoned(self):
-        return self.tombstoned_at is not None
+    def is_deleted(self):
+        return self.deleted_at is not None
 
     def render_uploaded_at(self):
         return self.uploaded_at.strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -213,6 +215,7 @@ class Page(models.Model):
         blank=True,
         related_name='pages',
     )
+    author = models.CharField(max_length=255, blank=True)
 
     class Meta:
         unique_together = ('organisation', 'path')
@@ -246,6 +249,7 @@ class PagePublication(models.Model):
         blank=True,
         related_name='page_publications',
     )
+    author = models.CharField(max_length=255, blank=True)
     content_hash = models.CharField(max_length=80, blank=True)
     reason = models.TextField(blank=True)
 

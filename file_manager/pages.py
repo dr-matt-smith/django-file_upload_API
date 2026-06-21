@@ -1,7 +1,8 @@
-"""The standalone `pages` publish feature (v8 — decoupled from packages).
+"""The standalone pages publish feature for the Celbridge Workshop API.
 
-A pages bundle is a ZIP uploaded to `POST /api/pages` containing a
-top-level `pages.toml` (`[publish].path`) and all the files to publish.
+A pages bundle is a ZIP uploaded to `POST /api/pages` containing either
+a top-level manifest (`page.toml` or `pages.toml`) declaring
+`[publish].path`, or a `path` form field — and all site files.
 The ZIP root is the site; every member except the manifest is extracted
 to a world-readable directory served at `/pages/<org-slug>/<path>/`.
 
@@ -35,7 +36,7 @@ class PathOverlapError(Exception):
         super().__init__(f"path overlaps published page '{other}'")
 
 
-_MANIFEST = 'pages.toml'
+_MANIFESTS = frozenset({'page.toml', 'pages.toml'})
 
 
 def _dest_dir(org, path: str) -> str:
@@ -43,7 +44,9 @@ def _dest_dir(org, path: str) -> str:
 
 
 def page_url(org, path: str) -> str:
-    return f'/pages/{org.slug}/{path}/'
+    from django.conf import settings as _settings
+    base = getattr(_settings, 'CANONICAL_ORIGIN', '').rstrip('/')
+    return f'{base}/pages/{org.slug}/{path}/'
 
 
 def _segs(p: str):
@@ -82,8 +85,8 @@ def _publishable_members(data: bytes):
             name = info.filename.replace('\\', '/')
             if name.endswith('/'):
                 continue                          # directory entry
-            if name.lower() == _MANIFEST:
-                continue                          # manifest is not content
+            if name.lower() in _MANIFESTS:
+                continue                          # manifests are not content
             normalised = posixpath.normpath(name)
             if normalised.startswith('..') or os.path.isabs(normalised):
                 continue                          # zip-slip guard
@@ -106,7 +109,7 @@ def _write_tree(members, dest_dir: str) -> None:
             fh.write(payload)
 
 
-def publish(org, path: str, django_file, *, principal_user=None):
+def publish(org, path: str, django_file, *, principal_user=None, author: str = ''):
     """Extract `django_file` to the served dir for (org, path), upsert the
     `Page` row, and append a `publish` event.
 
@@ -132,6 +135,7 @@ def publish(org, path: str, django_file, *, principal_user=None):
             'zip_file': django_file,
             'content_hash': digest,
             'published_by': _user_or_none(principal_user),
+            'author': author,
         },
     )
     PagePublication.objects.create(
@@ -140,6 +144,7 @@ def publish(org, path: str, django_file, *, principal_user=None):
         action='publish',
         content_hash=digest,
         published_by=_user_or_none(principal_user),
+        author=author,
     )
     return page
 

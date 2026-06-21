@@ -1,4 +1,4 @@
-"""Mint an API key for an existing organisation.
+"""Mint a Workshop Key for an existing organisation.
 
 Unlike `bootstrap_org` (which creates a new org), this issues an
 additional key for an org that already exists, printing the plaintext
@@ -15,7 +15,7 @@ from file_manager.models import ApiKey, Organisation
 
 
 class Command(BaseCommand):
-    help = 'Mint an API key for an existing organisation.'
+    help = 'Mint a Workshop Key for an existing organisation.'
 
     def add_arguments(self, parser):
         parser.add_argument('--org', required=True, help='Organisation slug')
@@ -24,7 +24,7 @@ class Command(BaseCommand):
             help='Optional username to attribute the key to (per-user key). '
                  'Omit for an org service key.',
         )
-        parser.add_argument('--label', default='api key', help='API key label')
+        parser.add_argument('--label', default='workshop key', help='Workshop Key label')
 
     def handle(self, *args, **options):
         slug = options['org']
@@ -58,7 +58,7 @@ class Command(BaseCommand):
             f'Issued {kind} key for organisation {org.slug}, label: {label!r}'
         ))
         self.stdout.write('')
-        self.stdout.write(self.style.WARNING('API key (shown once — store it now):'))
+        self.stdout.write(self.style.WARNING('Workshop Key (shown once — store it now):'))
         self.stdout.write(self.style.SUCCESS(f'    {plaintext}'))
         self.stdout.write('')
         self.stdout.write(f'Use it as:  Authorization: Api-Key {plaintext}')

@@ -24,7 +24,7 @@ class PackageValidationError(Exception):
 @dataclass(frozen=True)
 class ParsedPackage:
     name: str
-    author: str
+    author: str | None      # None when absent from manifest (form field is authoritative)
     history_md: str | None  # raw text of history.md if present, else None
 
 
@@ -74,18 +74,14 @@ def parse_package_zip(zip_path_or_file) -> ParsedPackage:
                 "invalid package - missing `[package] 'name' property` in package.toml` file"
             )
 
-        author = package_table.get('author')
-        if not author:
-            raise PackageValidationError(
-                "invalid package - missing `[package] 'author' property` in package.toml` file"
-            )
+        author = package_table.get('author') or None
 
         history_bytes = _read_member(zf, 'history.md')
         history_md = history_bytes.decode('utf-8') if history_bytes is not None else None
 
     return ParsedPackage(
         name=str(name).strip(),
-        author=str(author).strip(),
+        author=str(author).strip() if author else None,
         history_md=history_md,
     )
 
@@ -95,7 +91,7 @@ _PKG_HEADER_RE = re.compile(
 )
 _VERSIONS_HEADER_RE = re.compile(r'^##\s+Versions\s*$', re.MULTILINE)
 _VERSION_BLOCK_RE = re.compile(
-    r'^###\s+Version\s+(?P<n>\d+)(?:\s+\(tombstoned\))?\s*$', re.MULTILINE
+    r'^###\s+Version\s+(?P<n>\d+)(?:\s+\(deleted\))?\s*$', re.MULTILINE
 )
 
 

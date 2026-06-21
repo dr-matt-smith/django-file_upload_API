@@ -64,18 +64,38 @@ def validate_publish_path(raw) -> str:
     return path
 
 
+_ROOT_MANIFESTS = frozenset({'page.toml', 'pages.toml'})
+
+
 def _read_toml_at_root(zf: zipfile.ZipFile) -> bytes | None:
-    """Return the bytes of a top-level `pages.toml` (case-insensitive)."""
+    """Return bytes of a top-level `page.toml` or `pages.toml` (singular preferred)."""
+    found: dict[str, bytes] = {}
     for info in zf.infolist():
         name = info.filename.replace('\\', '/')
-        if '/' not in name.rstrip('/') and name.lower() == 'pages.toml':
+        if '/' not in name.rstrip('/') and name.lower() in _ROOT_MANIFESTS:
             with zf.open(info) as fh:
-                return fh.read()
-    return None
+                found[name.lower()] = fh.read()
+    return found.get('page.toml') or found.get('pages.toml')
 
 
-def parse_pages_zip(zip_path_or_file) -> ParsedPages:
-    """Open a pages ZIP and validate its `pages.toml`."""
+def validate_zip(zip_path_or_file) -> None:
+    """Raise PagesValidationError if the file is not a readable ZIP."""
+    try:
+        with zipfile.ZipFile(zip_path_or_file, 'r'):
+            pass
+    except zipfile.BadZipFile as exc:
+        raise PagesValidationError(
+            'invalid pages bundle - file is not a valid ZIP'
+        ) from exc
+
+
+def parse_pages_zip(zip_path_or_file, *, path_override: str = '') -> ParsedPages:
+    """Open a pages ZIP and validate its manifest.
+
+    If `path_override` is provided (from the multipart form field), the
+    manifest is not required — the ZIP just needs to be a valid ZIP. If the
+    manifest is absent and `path_override` is empty, a 422 is raised.
+    """
     try:
         zf = zipfile.ZipFile(zip_path_or_file, 'r')
     except zipfile.BadZipFile as exc:
@@ -86,17 +106,20 @@ def parse_pages_zip(zip_path_or_file) -> ParsedPages:
     with zf:
         toml_bytes = _read_toml_at_root(zf)
         if toml_bytes is None:
+            if path_override:
+                return ParsedPages(path=validate_publish_path(path_override))
             raise PagesValidationError(
-                'invalid pages bundle - missing top-level `pages.toml`'
+                'invalid pages bundle - missing top-level `page.toml` or `pages.toml`'
             )
         try:
             data = tomllib.loads(toml_bytes.decode('utf-8'))
         except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
             raise PagesValidationError(
-                'invalid pages bundle - `pages.toml` is not valid TOML'
+                'invalid pages bundle - manifest is not valid TOML'
             ) from exc
 
-        publish = data.get('publish') or {}
-        path = validate_publish_path(publish.get('path'))
+        publish_table = data.get('publish') or {}
+        manifest_path = publish_table.get('path') or ''
+        path = validate_publish_path(path_override or manifest_path)
 
     return ParsedPages(path=path)

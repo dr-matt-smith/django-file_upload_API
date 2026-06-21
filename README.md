@@ -86,7 +86,7 @@ the plaintext key **once**:
 ```bash
 python manage.py bootstrap_org --name "Acme" --slug acme --label "ci key"
 # → API key (shown once — store it now):
-#       kpf_xxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#       cel_xxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 Optionally attach a human user (so session/admin logins resolve to the
@@ -118,7 +118,7 @@ The API is available at http://127.0.0.1:8000. Send the key on every
 request:
 
 ```
-Authorization: Api-Key kpf_xxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Authorization: Api-Key cel_xxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 ## Authentication
@@ -237,7 +237,7 @@ contents (everything except `pages.toml`) at `/pages/<org-slug>/<path>/`
 ## Examples with cURL
 
 ```bash
-KEY="kpf_xxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+KEY="cel_xxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # List packages
 curl -H "Authorization: Api-Key $KEY" http://127.0.0.1:8000/api/packages

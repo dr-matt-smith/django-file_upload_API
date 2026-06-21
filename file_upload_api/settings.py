@@ -127,6 +127,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 PAGES_URL = '/pages/'
 PAGES_ROOT = os.path.join(BASE_DIR, 'media', 'pages')
+CANONICAL_ORIGIN = os.environ.get('CANONICAL_ORIGIN', '')
 os.makedirs(PAGES_ROOT, exist_ok=True)
 
 # Internationalization
